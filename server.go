@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 )
@@ -56,15 +57,35 @@ func (this *Server) Handler(conn net.Conn) {
 	//当前链接的业务
 	fmt.Println("链接建立成功")
 
-	user := NerUser(conn)
+	user := NerUser(conn, this)
 
-	//用户上线，将用户加入onlinemap
-	this.mapLock.Lock()
-	this.OnlineMap[user.Name] = user
-	this.mapLock.Unlock()
+	user.Online()
 
-	//广播用户上线
-	this.BroadCast(user, "已上线")
+	//接受客户端传递发送的消息
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := conn.Read(buf)
+			//TCP设计规定客户端关闭时的结果：
+			//正常下线的结果：n == 0, err == io.EOF
+			//某些系统实现：n == 0, err == nil
+			if n == 0 {
+				user.Offline()
+				return
+			}
+
+			if err != nil && err != io.EOF {
+				fmt.Println("Conn Read err: ", err)
+				return
+			}
+
+			//提取用户的消息，要除去\n
+			msg := string(buf[:n-1])
+
+			//用户针对msg进行消息处理
+			user.DoMessage(msg)
+		}
+	}()
 
 	//当前handler阻塞
 	select {}
